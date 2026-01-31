@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Projekt Opiekun - Wersja Graficzna</title>
+    <title>Projekt Opiekun - Wersja Poprawiona</title>
     <style>
         body {
             margin: 0;
@@ -24,6 +24,7 @@
         canvas {
             background-color: #111;
             display: block;
+            border: 2px solid #333;
         }
 
         /* UI */
@@ -35,9 +36,9 @@
             text-shadow: 1px 1px 2px black;
         }
 
-        .heart { font-size: 30px; color: #e74c3c; }
+        .heart { font-size: 30px; color: #e74c3c; margin-bottom: 5px; }
         
-        .keys-container { display: flex; gap: 5px; margin-top: 5px; }
+        .keys-container { display: flex; gap: 5px; }
         .key-slot { width: 25px; height: 25px; border: 2px solid #555; background: rgba(0,0,0,0.5); }
         .key-found { background: #bdc3c7; border-color: #c0392b; }
 
@@ -47,9 +48,10 @@
             right: 10px;
             text-align: right;
             font-size: 14px;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.7);
             padding: 10px;
             border-radius: 5px;
+            border: 1px solid #444;
         }
 
         #message-box {
@@ -58,13 +60,22 @@
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.9);
-            color: white;
+            color: #fff;
             padding: 15px;
             border: 1px solid #fff;
             display: none;
             text-align: center;
             font-size: 18px;
             max-width: 80%;
+            z-index: 100;
+        }
+
+        .controls-hint {
+            position: absolute;
+            bottom: 5px;
+            right: 10px;
+            font-size: 10px;
+            color: #555;
         }
     </style>
 </head>
@@ -83,14 +94,15 @@
     </div>
 
     <div id="inventory-display">
-        <div style="color: yellow; margin-bottom: 5px;">RĘKA [E - Wyrzuć]:</div>
-        <div id="hand-slot" style="font-weight: bold; font-size: 16px;">Pusta</div>
-        <hr style="border-color: #444;">
+        <div style="color: yellow; margin-bottom: 5px;">RĘKA [E-Wyrzuć, G-Akcja]:</div>
+        <div id="hand-slot" style="font-weight: bold; font-size: 16px; color: white;">Pusta</div>
+        <hr style="border-color: #444; margin: 5px 0;">
         <div style="color: cyan; margin-bottom: 5px;">UBIÓR (Pasywne):</div>
-        <div id="clothing-slot">Brak</div>
+        <div id="clothing-slot" style="font-size: 12px;">Brak</div>
     </div>
 
     <div id="message-box"></div>
+    <div class="controls-hint">WSAD: Ruch | F: Interakcja/Drzwi | E: Ekwipunek | G: Użyj/Rzut</div>
 </div>
 
 <script>
@@ -98,10 +110,10 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 /**
- * ZARZĄDZANIE GRAFIKĄ
- * System ładuje obrazki z folderu img/. Jeśli plik nie istnieje, rysuje kolorowy kwadrat.
+ * ZARZĄDZANIE GRAFIKĄ (PLACEHOLDER + ŁADOWANIE)
  */
 const textures = {};
+// Lista nazw plików (zakładamy format .png dla przedmiotów, .jpg dla teł)
 const imageList = [
     'player', 'tarantula', 'breather',
     'bg_hol', 'bg_salon', 'bg_kuchnia', 'bg_sypialnia', 'bg_korytarz', 
@@ -109,12 +121,12 @@ const imageList = [
     'item_buty', 'item_klucz', 'item_noz', 'item_zapalniczka', 'item_dyktafon',
     'item_maska', 'item_klucz_nastawny', 'item_lampa', 'item_lom', 'item_wegiel',
     'item_rekawice', 'item_bomba', 'item_skrzynia', 'item_stol', 'item_piec',
-    'item_part1', 'item_part2', 'item_part3'
+    'item_part1', 'item_part2', 'item_part3', 'door_tex'
 ];
 
 imageList.forEach(name => {
     const img = new Image();
-    // Zakładamy, że obrazki są w folderze img/ i mają rozszerzenie png (przedmioty) lub jpg (tła)
+    // Prosta logika rozszerzeń: tła bg_ to jpg, reszta png
     let ext = name.startsWith('bg_') ? '.jpg' : '.png';
     img.src = 'img/' + name + ext; 
     textures[name] = img;
@@ -126,36 +138,31 @@ function drawSprite(name, x, y, w, h, fallbackColor) {
     if (img && img.complete && img.naturalHeight !== 0) {
         ctx.drawImage(img, x, y, w, h);
     } else {
+        // Fallback (jeśli brak obrazka)
         ctx.fillStyle = fallbackColor || 'magenta';
         ctx.fillRect(x, y, w, h);
-        // Opcjonalnie napisz co to jest, jeśli brak grafiki
-        if(w > 30) {
-            ctx.fillStyle = "white";
-            ctx.font = "10px Arial";
-            ctx.fillText(name.substring(0,5), x, y+10);
-        }
     }
 }
 
 /**
- * KONFIGURACJA GRY
- * Prędkość zmniejszona o 40% (mnożnik 0.6)
+ * PARAMETRY GRY
  */
-const SPEED_MODIFIER = 0.6; 
+const SPEED_MODIFIER = 0.6; // Gra wolniejsza o 40%
 const GRAVITY = 0.5 * SPEED_MODIFIER;
 const PLAYER_SPEED = 4 * SPEED_MODIFIER; 
-const JUMP_FORCE = -9 * SPEED_MODIFIER; // Skok musi być proporcjonalny do grawitacji
+const JUMP_FORCE = -9 * SPEED_MODIFIER;
+const ENEMY_SPEED = 1.5 * SPEED_MODIFIER; // Wolniejsza tarantula
 
 let game = {
     currentRoom: "hol",
     gameOver: false,
     messageTimer: 0,
+    projectiles: [], // Tablica na noże
     flags: {
-        stoveOff: false,
         bunkierOpen: false,
         finalKeyForged: false,
         recorderData: null,
-        isBasementLocked: true 
+        tarantulaDead: false
     }
 };
 
@@ -165,20 +172,31 @@ let player = {
     hp: 100,
     state: "standing",
     facingRight: true,
-    
-    // NOWY SYSTEM EKWIPUNKU
-    handItem: null, // Obiekt lub null. Tylko 1 przedmiot w ręce.
-    clothing: [],   // Tablica nazw ubrań (Buty, Maska, Rękawice)
+    handItem: null, 
+    clothing: [],   
     keysParts: [false, false, false]
 };
 
 let monsters = {
-    tarantula: { active: true, room: "sklad", x: 400, y: 500, w: 60, h: 40, hp: 2 },
-    breather: { active: true, room: "bunkier", x: 600, y: 460, w: 50, h: 90, hp: 100, speed: 2.0 * SPEED_MODIFIER }
+    tarantula: { 
+        active: true, 
+        room: "sklad", 
+        x: 600, y: 520, w: 60, h: 40, 
+        hp: 2, 
+        stunned: 0, // Czas ogłuszenia
+        damage: 1 
+    },
+    breather: { 
+        active: true, 
+        room: "bunkier", 
+        x: 600, y: 460, w: 50, h: 90, 
+        hp: 100, 
+        speed: 2.0 * SPEED_MODIFIER 
+    }
 };
 
 /**
- * DEFINICJA POKOI
+ * POKOJE
  */
 const rooms = {
     "hol": {
@@ -187,7 +205,7 @@ const rooms = {
         doors: [
             { to: "salon", x: 10, y: 450, w: 40, h: 100, tx: 700, ty: 450 },
             { to: "kuchnia", x: 750, y: 450, w: 40, h: 100, tx: 50, ty: 450 },
-            { to: "korytarz", x: 380, y: 450, w: 40, h: 100, tx: 380, ty: 450, type: "stairs_up" }, // Schody to teraz drzwi
+            { to: "korytarz", x: 380, y: 450, w: 60, h: 100, tx: 380, ty: 450, label: "Schody" },
             { to: "sklad", x: 200, y: 450, w: 40, h: 100, tx: 50, ty: 450, locked: true, keyName: "Klucz Piwniczny" }
         ],
         items: [
@@ -219,7 +237,7 @@ const rooms = {
         name: "Korytarz", bgCode: "bg_korytarz",
         platforms: [[0, 550, 800, 50]],
         doors: [
-            { to: "hol", x: 380, y: 450, w: 40, h: 100, tx: 380, ty: 450, type: "stairs_down" },
+            { to: "hol", x: 380, y: 450, w: 60, h: 100, tx: 380, ty: 450, label: "Schody" },
             { to: "sypialnia", x: 10, y: 450, w: 40, h: 100, tx: 700, ty: 450 },
             { to: "strych", x: 600, y: 450, w: 40, h: 100, tx: 50, ty: 450, locked: true, keyName: "Klucz Piwniczny" }
         ],
@@ -236,7 +254,7 @@ const rooms = {
         platforms: [[0, 550, 800, 50]],
         doors: [
             { to: "korytarz", x: 10, y: 450, w: 40, h: 100, tx: 550, ty: 450 },
-            { to: "poddasze", x: 400, y: 450, w: 60, h: 100, tx: 400, ty: 500, locked: true, keyName: "Łom" } // Drabina
+            { to: "poddasze", x: 400, y: 450, w: 60, h: 100, tx: 400, ty: 500, locked: true, keyName: "Łom" }
         ],
         items: [
             { id: "maska", name: "Maska Gazowa", type: "clothing", x: 200, y: 520, tex: "item_maska", color: "green" },
@@ -248,7 +266,7 @@ const rooms = {
         name: "Poddasze", bgCode: "bg_poddasze",
         lowCeiling: true, hazard: "wata",
         platforms: [[0, 550, 800, 50]],
-        doors: [ { to: "strych", x: 400, y: 500, w: 60, h: 50, tx: 400, ty: 450 } ], // Klapa w dół
+        doors: [ { to: "strych", x: 400, y: 500, w: 60, h: 50, tx: 400, ty: 450 } ],
         items: [
             { id: "klucz_czesc_1", name: "Część Klucza 1", type: "keypart", partIdx: 0, x: 700, y: 520, tex: "item_part1", color: "silver" },
             { id: "pakiet_wwi", name: "Broń WWI", type: "hand", x: 100, y: 520, tex: "item_skrzynia", color: "olive" }
@@ -294,7 +312,7 @@ const rooms = {
 };
 
 /**
- * OBSŁUGA WEJŚCIA
+ * STEROWANIE
  */
 const keys = { w:false, a:false, s:false, d:false, z:false };
 
@@ -305,8 +323,9 @@ window.addEventListener('keydown', (e) => {
     if(k === 's') keys.s = true;
     if(k === 'd') keys.d = true;
     if(k === 'z') keys.z = true;
-    if(k === 'e') actionInteract();
-    if(k === 'f') actionDoor();
+    if(k === 'e') actionInteract(); // Podnoszenie / Wyrzucanie
+    if(k === 'f') actionUseOrDoor(); // Używanie (Stół, Regał, Zapalniczka) / Drzwi
+    if(k === 'g') actionSpecial(); // Rzut nożem / Dyktafon
 });
 window.addEventListener('keyup', (e) => {
     let k = e.key.toLowerCase();
@@ -317,15 +336,192 @@ window.addEventListener('keyup', (e) => {
     if(k === 'z') keys.z = false;
 });
 
-function showMessage(msg) {
+function showMessage(msg, duration = 180) {
     const box = document.getElementById('message-box');
     box.innerText = msg;
     box.style.display = 'block';
-    game.messageTimer = 180;
+    game.messageTimer = duration;
 }
 
 /**
- * LOGIKA GRY
+ * LOGIKA: RZUCANIE NOŻEM I SPECJALNE (Klawisz G)
+ */
+function actionSpecial() {
+    if(!player.handItem) return;
+
+    // 1. Dyktafon - ZAPIS
+    if(player.handItem.id === 'dyktafon') {
+        const name = prompt("Nagrywanie wiadomości... Podaj imię:");
+        const msg = prompt("Wiadomość dla potomnych:");
+        if(name && msg) {
+            game.flags.recorderData = { name: name, msg: msg };
+            // Zapis do localStorage
+            localStorage.setItem('opiekun_save', JSON.stringify(game.flags.recorderData));
+            showMessage("NAGRANO. Stan duszy zapisany.");
+        }
+        return;
+    }
+
+    // 2. Nóż - RZUT
+    if(player.handItem.id === 'noz') {
+        // Stwórz pocisk
+        game.projectiles.push({
+            x: player.x + (player.facingRight ? 30 : -10),
+            y: player.y + 20,
+            vx: player.facingRight ? 8 : -8,
+            width: 20, height: 5,
+            active: true
+        });
+        player.handItem = null; // Usuń nóż z ręki
+        showMessage("Rzuciłeś nożem!");
+        return;
+    }
+}
+
+/**
+ * LOGIKA: UŻYWANIE / DRZWI (Klawisz F)
+ */
+function actionUseOrDoor() {
+    let room = rooms[game.currentRoom];
+
+    // 1. ZAPALNICZKA NA TARANTULĘ
+    if(player.handItem && player.handItem.id === 'zapalniczka' && 
+       game.currentRoom === 'sklad' && monsters.tarantula.active) {
+        
+        let t = monsters.tarantula;
+        // Sprawdź dystans (czy blisko)
+        let dist = Math.abs((player.x + 15) - (t.x + 30));
+        
+        if(dist < 80) { // Zasięg podpalenia
+            monsters.tarantula.active = false;
+            monsters.tarantula.hp = 0;
+            game.flags.tarantulaDead = true;
+            player.handItem = null; // Zużyj zapalniczkę
+            showMessage("SPALIŁEŚ TARANTULĘ! Droga wolna.");
+            return;
+        }
+    }
+
+    // 2. STACJONARNE PRZEDMIOTY (Regał, Stół)
+    for(let i=0; i<room.items.length; i++) {
+        let it = room.items[i];
+        if(it.type === "static" && checkOverlap(player, {x:it.x, y:it.y, width: it.w||30, height: it.h||30})) {
+            
+            if(it.id === "regal") {
+                if(player.clothing.includes("Rękawice")) {
+                    it.x = 600; // Przesunięcie
+                    let key = room.items.find(x => x.id === "klucz_czesc_3");
+                    if(key) key.hidden = false;
+                    showMessage("Regał przesunięty.");
+                } else showMessage("Za ciężki. Załóż rękawice.");
+                return;
+            }
+            // Inne interakcje...
+        }
+    }
+
+    // 3. DRZWI (Zawsze na końcu sprawdzenia)
+    let usedDoor = null;
+    room.doors.forEach(door => {
+        if(checkOverlap(player, {x: door.x, y: door.y, width: door.w, height: door.h})) {
+            usedDoor = door;
+        }
+    });
+
+    if(usedDoor) {
+        if(usedDoor.locked) {
+            if(player.handItem && player.handItem.name === usedDoor.keyName) {
+                showMessage("Otwierasz drzwi: " + usedDoor.keyName);
+                usedDoor.locked = false;
+                enterDoor(usedDoor);
+            } else if (usedDoor.keyName === "tunel" && game.flags.bunkierOpen) {
+                enterDoor(usedDoor);
+            } else {
+                showMessage("Zamknięte. Potrzeba: " + usedDoor.keyName);
+            }
+        } else {
+            enterDoor(usedDoor);
+        }
+    }
+}
+
+function enterDoor(door) {
+    game.currentRoom = door.to;
+    player.x = door.tx;
+    player.y = door.ty;
+    player.vx = 0; // Reset pędu przy wejściu
+}
+
+/**
+ * LOGIKA: PODNOSZENIE / WYMIANA (Klawisz E)
+ */
+function actionInteract() {
+    let room = rooms[game.currentRoom];
+    let foundItemIndex = -1;
+
+    // Szukaj przedmiotu pod nogami
+    for(let i=0; i<room.items.length; i++) {
+        let it = room.items[i];
+        if(!it.hidden && it.type !== "static" && checkOverlap(player, {x: it.x, y: it.y, width: 30, height: 30})) {
+            foundItemIndex = i;
+            break;
+        }
+    }
+
+    if(foundItemIndex !== -1) {
+        let newItem = room.items[foundItemIndex];
+
+        // Część klucza
+        if(newItem.type === "keypart") {
+            player.keysParts[newItem.partIdx] = true;
+            room.items.splice(foundItemIndex, 1);
+            showMessage("Część klucza zdobyta!");
+            return;
+        }
+
+        // Ubranie (zakładamy od razu)
+        if(newItem.type === "clothing") {
+            if(!player.clothing.includes(newItem.name)) {
+                player.clothing.push(newItem.name);
+                room.items.splice(foundItemIndex, 1);
+                showMessage("Założono: " + newItem.name);
+            }
+            return;
+        }
+
+        // Przedmiot do ręki
+        if(newItem.type === "hand") {
+            if(player.handItem) {
+                // Wymiana: stary na ziemię
+                let oldItem = player.handItem;
+                oldItem.x = player.x; 
+                oldItem.y = player.y + 20;
+                room.items.push(oldItem);
+                
+                player.handItem = newItem;
+                room.items.splice(foundItemIndex, 1);
+                showMessage("Wymiana: " + newItem.name);
+            } else {
+                // Pusta ręka
+                player.handItem = newItem;
+                room.items.splice(foundItemIndex, 1);
+                showMessage("Wzięto: " + newItem.name);
+            }
+            return;
+        }
+    } else if (player.handItem) {
+        // Wyrzucanie w powietrze
+        let itemToDrop = player.handItem;
+        itemToDrop.x = player.x;
+        itemToDrop.y = player.y + 20;
+        room.items.push(itemToDrop);
+        player.handItem = null;
+        showMessage("Wyrzucono: " + itemToDrop.name);
+    }
+}
+
+/**
+ * GŁÓWNA PĘTLA AKTUALIZACJI
  */
 function update() {
     if(game.gameOver) return;
@@ -334,22 +530,15 @@ function update() {
         if(game.messageTimer <= 0) document.getElementById('message-box').style.display = 'none';
     }
 
-    // 1. RUCH I FIZYKA
+    // 1. RUCH GRACZA
     let currentSpeed = PLAYER_SPEED;
-    if(keys.z) {
-        player.state = "crawling";
-        player.height = 25;
-        currentSpeed *= 0.3;
-    } else if(keys.s) {
-        player.state = "crouching";
-        player.height = 40;
-    } else {
+    if(keys.z) { player.state = "crawling"; player.height = 25; currentSpeed *= 0.3; }
+    else if(keys.s) { player.state = "crouching"; player.height = 40; }
+    else {
         player.state = "standing";
         player.height = 60;
         if(rooms[game.currentRoom].lowCeiling) {
-             player.state = "crawling"; 
-             player.height = 25;
-             currentSpeed *= 0.3;
+             player.state = "crawling"; player.height = 25; currentSpeed *= 0.3;
         }
     }
 
@@ -372,7 +561,6 @@ function update() {
                onGround = true;
         }
     });
-    // Ograniczenia ekranu
     if(player.x < 0) player.x = 0;
     if(player.x > 800 - player.width) player.x = 800 - player.width;
 
@@ -380,154 +568,87 @@ function update() {
         player.vy = JUMP_FORCE;
     }
 
-    // 2. ŚRODOWISKO (Czad itp.)
-    if(room.hazard === "czad" && !player.clothing.includes("Maska Gazowa")) {
-        player.hp -= 0.2;
-        if(Math.random() < 0.05) showMessage("Duszę się! Potrzebuję maski!");
+    // 2. POCISKI (NOŻE)
+    for(let i = game.projectiles.length - 1; i >= 0; i--) {
+        let p = game.projectiles[i];
+        p.x += p.vx;
+        
+        // Wyjście za ekran
+        if(p.x < 0 || p.x > 800) { game.projectiles.splice(i, 1); continue; }
+
+        // Kolizja z Tarantulą
+        if(game.currentRoom === 'sklad' && monsters.tarantula.active) {
+            let t = monsters.tarantula;
+            if(checkRectCollide(p.x, p.y, p.width, p.height, t.x, t.y, t.w, t.h)) {
+                monsters.tarantula.stunned = 300; // 5 sekund (przy 60fps)
+                showMessage("Tarantula ogłuszona!");
+                game.projectiles.splice(i, 1); // Usuń nóż
+                continue;
+            }
+        }
     }
+
+    // 3. LOGIKA TARANTULI
+    if(game.currentRoom === 'sklad' && monsters.tarantula.active) {
+        let t = monsters.tarantula;
+        
+        if(t.stunned > 0) {
+            t.stunned--;
+        } else {
+            // Ruch w stronę gracza
+            if(player.x > t.x + 10) t.x += ENEMY_SPEED;
+            else if(player.x < t.x - 10) t.x -= ENEMY_SPEED;
+            
+            // Atak
+            if(checkRectCollide(player.x, player.y, player.width, player.height, t.x, t.y, t.w, t.h)) {
+                player.hp -= 1; 
+                showMessage("Tarantula gryzie!", 60);
+            }
+        }
+    }
+
+    // Środowisko (Czad)
+    if(room.hazard === "czad" && !player.clothing.includes("Maska Gazowa")) {
+        player.hp -= 0.1;
+    }
+    
+    // Koniec gry
     if(player.hp <= 0) {
-        alert("Śmierć. Odrodzenie...");
-        resetGame();
+        alert("Zginąłeś.");
+        location.reload();
     }
 
     updateUI();
 }
 
 /**
- * INTERAKCJE (KLUCZ E i F)
+ * POMOCNICZE
  */
-
-// Wejście w drzwi (F)
-function actionDoor() {
-    let room = rooms[game.currentRoom];
-    let usedDoor = null;
-
-    room.doors.forEach(door => {
-        if(checkOverlap(player, {x: door.x, y: door.y, width: door.w, height: door.h})) {
-            usedDoor = door;
-        }
-    });
-
-    if(usedDoor) {
-        if(usedDoor.locked) {
-            // Sprawdź czy mamy klucz w RĘCE
-            if(player.handItem && player.handItem.name === usedDoor.keyName) {
-                showMessage("Otwierasz drzwi używając: " + usedDoor.keyName);
-                usedDoor.locked = false; // Odblokowane na stałe w tej sesji
-                game.currentRoom = usedDoor.to;
-                player.x = usedDoor.tx;
-                player.y = usedDoor.ty;
-            } else if (usedDoor.keyName === "tunel" && game.flags.bunkierOpen) {
-                 game.currentRoom = usedDoor.to;
-                 player.x = usedDoor.tx;
-                 player.y = usedDoor.ty;
-            } else {
-                showMessage("Zamknięte. Wymaga: " + usedDoor.keyName);
-            }
-        } else {
-            game.currentRoom = usedDoor.to;
-            player.x = usedDoor.tx;
-            player.y = usedDoor.ty;
-        }
-    }
+function checkOverlap(playerObj, rect) {
+    return checkRectCollide(playerObj.x, playerObj.y, playerObj.width, playerObj.height, rect.x, rect.y, rect.width, rect.height);
 }
 
-// Podnoszenie / Upuszczanie (E)
-function actionInteract() {
-    let room = rooms[game.currentRoom];
-    let foundItemIndex = -1;
-
-    // Sprawdź czy stoimy na przedmiocie
-    for(let i=0; i<room.items.length; i++) {
-        let it = room.items[i];
-        if(!it.hidden && checkOverlap(player, {x: it.x, y: it.y, width: 30, height: 30})) {
-            foundItemIndex = i;
-            break;
-        }
-    }
-
-    // 1. Jeśli stoimy na przedmiocie
-    if(foundItemIndex !== -1) {
-        let newItem = room.items[foundItemIndex];
-        
-        if(newItem.type === "static") {
-            // Obsługa regału itp.
-            if(newItem.id === "regal") {
-                if(player.clothing.includes("Rękawice")) {
-                    newItem.x = 600; 
-                    let key = room.items.find(x => x.id === "klucz_czesc_3");
-                    if(key) key.hidden = false;
-                    showMessage("Przesunięto regał.");
-                } else showMessage("Za ciężkie. Potrzeba rękawic.");
-            }
-            return;
-        }
-
-        if(newItem.type === "keypart") {
-            player.keysParts[newItem.partIdx] = true;
-            room.items.splice(foundItemIndex, 1);
-            showMessage("Znaleziono część klucza!");
-            return;
-        }
-
-        if(newItem.type === "clothing") {
-            // Ubrania bierzemy zawsze
-            if(!player.clothing.includes(newItem.name)) {
-                player.clothing.push(newItem.name);
-                room.items.splice(foundItemIndex, 1);
-                showMessage("Założono: " + newItem.name);
-            }
-            return;
-        }
-
-        if(newItem.type === "hand") {
-            // Jeśli mamy już coś w ręce -> Wymiana
-            if(player.handItem) {
-                // Stary przedmiot ląduje na ziemi
-                let oldItem = player.handItem;
-                oldItem.x = player.x;
-                oldItem.y = player.y + 20;
-                room.items.push(oldItem);
-                
-                // Nowy do ręki
-                player.handItem = newItem;
-                room.items.splice(foundItemIndex, 1);
-                showMessage("Wymieniono na: " + newItem.name);
-            } else {
-                // Mamy pustą rękę -> Bierzemy
-                player.handItem = newItem;
-                room.items.splice(foundItemIndex, 1);
-                showMessage("Wzięto: " + newItem.name);
-            }
-            return;
-        }
-    } 
-    // 2. Jeśli NIE stoimy na przedmiocie, ale mamy coś w ręce -> Wyrzucamy
-    else if (player.handItem) {
-        let itemToDrop = player.handItem;
-        itemToDrop.x = player.x;
-        itemToDrop.y = player.y + 20; // Upuść pod nogi
-        room.items.push(itemToDrop);
-        player.handItem = null;
-        showMessage("Wyrzucono: " + itemToDrop.name);
-    }
+function checkRectCollide(x1, y1, w1, h1, x2, y2, w2, h2) {
+    return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
 }
 
-function checkOverlap(rect1, rect2) {
-    return (rect1.x < rect2.x + rect2.width &&
-            rect1.x + rect1.width > rect2.x &&
-            rect1.y < rect2.y + rect2.height &&
-            rect1.y + rect1.height > rect2.y);
-}
+function updateUI() {
+    document.getElementById('heart-display').innerText = "♥ " + Math.floor(player.hp) + "%";
+    
+    // Klucze
+    for(let i=0; i<3; i++) {
+        let slot = document.getElementById('key'+(i+1));
+        if(player.keysParts[i]) slot.classList.add('key-found');
+    }
 
-function resetGame() {
-    player.hp = 100;
-    player.x = 100; 
-    player.y = 500;
-    player.handItem = null;
-    player.clothing = [];
-    player.keysParts = [false, false, false];
-    game.currentRoom = "hol";
+    // Ekwipunek
+    let handText = player.handItem ? player.handItem.name : "Pusta";
+    if(player.handItem?.id === 'noz') handText += " (G: Rzuć)";
+    if(player.handItem?.id === 'dyktafon') handText += " (G: Zapisz)";
+    if(player.handItem?.id === 'zapalniczka') handText += " (F blisko wroga: Spal)";
+    
+    document.getElementById('hand-slot').innerText = handText;
+    document.getElementById('clothing-slot').innerText = player.clothing.join(", ") || "Brak";
 }
 
 /**
@@ -539,53 +660,62 @@ function draw() {
     // 1. TŁO
     drawSprite(room.bgCode, 0, 0, 800, 600, '#222');
 
-    // 2. PLATFORMY (Podgląd debugowy, w finalnej wersji można usunąć jeśli tło ma podłogę)
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    room.platforms.forEach(p => ctx.fillRect(p[0], p[1], p[2], p[3]));
-
-    // 3. DRZWI
+    // 2. DRZWI (Teraz wyraźne)
     room.doors.forEach(d => {
-        // Drzwi są teraz "duchami", nie rysujemy ścian, chyba że debug
-        // Rysujemy podświetlenie, jeśli gracz jest blisko
+        // Futryna
+        ctx.fillStyle = "#2c3e50"; 
+        ctx.fillRect(d.x-2, d.y-2, d.w+4, d.h+4);
+        
+        // Skrzydło drzwi
+        ctx.fillStyle = d.locked ? "#c0392b" : "#95a5a6"; // Czerwone jak zamknięte, Szare jak otwarte
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+        
+        // Klamka
+        ctx.fillStyle = "black";
+        ctx.beginPath();
+        ctx.arc(d.x + 5, d.y + d.h/2, 3, 0, Math.PI*2);
+        ctx.fill();
+
+        // Info tekst
         if(checkOverlap(player, {x:d.x, y:d.y, width:d.w, height:d.h})) {
-            ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
-            ctx.fillRect(d.x, d.y, d.w, d.h);
-            
-            ctx.fillStyle = "white";
-            ctx.font = "14px monospace";
-            ctx.fillText("[F] Wejdź", player.x - 10, player.y - 10);
-            
-            if(d.locked) {
-                ctx.fillStyle = "red";
-                ctx.fillText("(Zamknięte)", player.x - 10, player.y - 25);
-            }
+             ctx.fillStyle = "white";
+             ctx.font = "12px Arial";
+             ctx.fillText("[F]", d.x + d.w/2 - 8, d.y - 10);
         }
     });
 
-    // 4. PRZEDMIOTY
+    // 3. PRZEDMIOTY
     room.items.forEach(item => {
         if(item.hidden) return;
         let w = item.w || 30;
         let h = item.h || 30;
         drawSprite(item.tex, item.x, item.y, w, h, item.color);
-
-        // Wyświetl nazwę jeśli gracz jest blisko
+        
         if(checkOverlap(player, {x:item.x - 20, y:item.y - 20, width: w+40, height: h+40})) {
             ctx.fillStyle = "lime";
             ctx.font = "12px monospace";
-            let action = item.type === "static" ? "[F] Użyj" : "[E] Weź";
             ctx.fillText(item.name, item.x, item.y - 5);
-            ctx.fillText(action, item.x, item.y - 18);
         }
+    });
+
+    // 4. POCISKI
+    game.projectiles.forEach(p => {
+        ctx.fillStyle = "white";
+        ctx.fillRect(p.x, p.y, p.width, p.height);
     });
 
     // 5. GRACZ
     drawSprite("player", player.x, player.y, player.width, player.height, "blue");
 
-    // 6. POTWORY
+    // 6. WROGOWIE
     if(monsters.tarantula.active && game.currentRoom === "sklad") {
         let t = monsters.tarantula;
+        // Efekt ogłuszenia (migotanie)
+        if(t.stunned > 0 && Math.floor(Date.now()/100)%2===0) {
+            ctx.globalAlpha = 0.5;
+        }
         drawSprite("tarantula", t.x, t.y, t.w, t.h, "purple");
+        ctx.globalAlpha = 1.0;
     }
 
     // 7. CIEMNOŚĆ
@@ -595,28 +725,18 @@ function draw() {
     }
 }
 
-function updateUI() {
-    document.getElementById('heart-display').innerText = "♥ " + Math.floor(player.hp) + "%";
-    
-    // Klucze
-    for(let i=0; i<3; i++) {
-        let slot = document.getElementById('key'+(i+1));
-        if(player.keysParts[i]) slot.classList.add('key-found');
-        else slot.classList.remove('key-found');
-    }
-
-    // Ekwipunek
-    let handText = player.handItem ? player.handItem.name : "Pusta";
-    document.getElementById('hand-slot').innerText = handText;
-    
-    let clothText = player.clothing.length > 0 ? player.clothing.join(", ") : "Brak";
-    document.getElementById('clothing-slot').innerText = clothText;
-}
-
 function loop() {
     update();
     draw();
     requestAnimationFrame(loop);
+}
+
+// Start
+// Sprawdzenie zapisu przy starcie (opcjonalne, ale zgodne z lore)
+let saved = localStorage.getItem('opiekun_save');
+if(saved) {
+    let data = JSON.parse(saved);
+    console.log("Znaleziono duszę:", data.name);
 }
 
 loop();
