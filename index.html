@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Projekt Opiekun</title>
+    <style>
+        /* STYLIZACJA STRONY I INTERFEJSU */
+        body {
+            margin: 0;
+            background-color: #111;
+            color: #ccc;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 0 20px #000;
+        }
+
+        canvas {
+            background-color: #222;
+            border: 2px solid #444;
+            display: block;
+        }
+
+        /* UI - HUD (Serce, Klucze) */
+        #ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none; /* Kliknięcia przechodzą przez UI */
+        }
+
+        .heart {
+            font-size: 30px;
+            color: #e74c3c; /* Czerwone serce */
+            text-shadow: 0 0 5px #000;
+        }
+
+        .keys-container {
+            margin-top: 10px;
+            display: flex;
+            gap: 5px;
+        }
+
+        .key-slot {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #555;
+            background: #000;
+        }
+        .key-found {
+            background: #bdc3c7;
+            border-color: #c0392b;
+        }
+
+        /* EKWIPUNEK I POWIADOMIENIA */
+        #message-box {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border: 1px solid #fff;
+            display: none;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        #inventory-display {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            text-align: right;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div id="ui-layer">
+        <div id="heart-display" class="heart">♥</div>
+        <div class="keys-container">
+            <div id="key1" class="key-slot"></div>
+            <div id="key2" class="key-slot"></div>
+            <div id="key3" class="key-slot"></div>
+        </div>
+    </div>
+
+    <div id="inventory-display">
+        <div>Ekwipunek [E]: <span id="inv-list">Pusty</span></div>
+        <div>Ręka [1-3]: <span id="hand-item">Brak</span></div>
+    </div>
+
+    <div id="message-box"></div>
+</div>
+
+<script>
+/**
+ * KONFIGURACJA I ZMIENNE GLOBALNE
+ * Tutaj łatwo zmienisz parametry gry.
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Stałe gry
+const TILE_SIZE = 40; // Rozmiar kratek
+const GRAVITY = 0.5;
+const PLAYER_SPEED = 4;
+const PLAYER_CRAWL_SPEED = 1.2; // 30% prędkości
+const JUMP_FORCE = -8;
+
+// Stan gry (Global State)
+let game = {
+    currentRoom: "hol",
+    gameOver: false,
+    messageTimer: 0,
+    darkness: false, // Czy w pokoju jest ciemno
+    flags: {
+        hasBasementKey: false,
+        isBasementLocked: true, // Zaczynamy zamknięte
+        stoveOff: false, // Czy piec zgaszony
+        pipesFixed: false,
+        bunkierOpen: false, // Czy tunel otwarty
+        monsterStunned: false,
+        monsterTrapped: false, // Czy potwór w piwnicy
+        finalKeyForged: false,
+        recorderData: null // {name: "", msg: ""}
+    }
+};
+
+// Gracz
+let player = {
+    x: 100,
+    y: 500,
+    width: 30,
+    height: 50, // Zmienia się przy kucaniu/leżeniu
+    color: "#3498db",
+    vx: 0,
+    vy: 0,
+    hp: 100, // 0-100
+    state: "standing", // standing, crouching, crawling
+    inventory: [], // Tablica nazw przedmiotów
+    activeItem: null, // To co w ręce (np. broń)
+    keysParts: [false, false, false] // Części klucza wyjściowego
+};
+
+// Potwory
+let monsters = {
+    tarantula: { active: true, room: "sklad", x: 400, y: 500, hp: 2, type: "spider" },
+    breather: { active: true, room: "bunkier", x: 600, y: 500, hp: 100, speed: 2.5, stunnedTimer: 0, type: "boss" }
+};
+
+/**
+ * BAZA DANYCH POKOI
+ * Każdy pokój ma przeszkody (platforms), drzwi (doors) i przedmioty (items).
+ */
+const rooms = {
+    "hol": {
+        name: "Hol Główny",
+        bg: "#333",
+        platforms: [[0, 550, 800, 50]], // Podłoga
+        doors: [
+            { to: "salon", x: 10, y: 450, w: 20, h: 100, targetX: 700, targetY: 450 },
+            { to: "kuchnia", x: 770, y: 450, w: 20, h: 100, targetX: 50, targetY: 450 },
+            { to: "korytarz", x: 400, y: 0, w: 100, h: 20, targetX: 400, targetY: 500 }, // Schody w górę
+            { to: "sklad", x: 200, y: 450, w: 40, h: 100, targetX: 50, targetY: 450, locked: true, keyId: "klucz_piwnica" } // Do piwnicy
+        ],
+        items: [
+            { name: "buty", x: 300, y: 520, color: "brown", label: "Buty" },
+            { name: "stół_miejsce", x: 500, y: 520, color: "rgba(255,255,255,0.1)", label: "Miejsce na stół", static: true }
+        ]
+    },
+    "salon": {
+        name: "Salon",
+        bg: "#3e2723",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 770, y: 450, w: 20, h: 100, targetX: 40, targetY: 450 }
+        ],
+        items: [
+            { name: "klucz_piwnica", x: 200, y: 520, color: "gold", label: "Klucz Piwnica/Strych" },
+            { name: "regal", x: 400, y: 450, w: 60, h: 100, color: "sienna", label: "Regał (wymaga rękawic)", static: true },
+            { name: "klucz_czesc_3", x: 420, y: 520, color: "silver", label: "Część Klucza 3", hidden: true }
+        ]
+    },
+    "kuchnia": {
+        name: "Kuchnia",
+        bg: "#555",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 10, y: 450, w: 20, h: 100, targetX: 700, targetY: 450 }
+        ],
+        items: [
+            { name: "noz", x: 300, y: 520, color: "silver", label: "Nóż" },
+            { name: "zapalniczka", x: 350, y: 520, color: "orange", label: "Zapalniczka" },
+            { name: "zsyp", x: 600, y: 530, w: 100, h: 20, color: "black", label: "Zsyp", static: true }
+        ]
+    },
+    "korytarz": {
+        name: "Korytarz (I Piętro)",
+        bg: "#2c3e50",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 400, y: 550, w: 100, h: 20, targetX: 400, targetY: 50 }, // W dół
+            { to: "sypialnia", x: 10, y: 450, w: 20, h: 100, targetX: 700, targetY: 450 },
+            { to: "strych", x: 600, y: 450, w: 40, h: 100, targetX: 50, targetY: 450, locked: true, keyId: "klucz_piwnica" }
+        ],
+        items: []
+    },
+    "sypialnia": {
+        name: "Sypialnia",
+        bg: "#4a235a",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "korytarz", x: 770, y: 450, w: 20, h: 100, targetX: 40, targetY: 450 }
+        ],
+        items: [
+            { name: "dyktafon", x: 400, y: 520, color: "cyan", label: "Dyktafon" }
+        ]
+    },
+    "strych": {
+        name: "Stary Strych",
+        bg: "#1a1a1a",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "korytarz", x: 10, y: 450, w: 20, h: 100, targetX: 550, targetY: 450 },
+            { to: "poddasze", x: 400, y: 0, w: 100, h: 20, targetX: 400, targetY: 500, locked: true, keyId: "lom" } // Wymaga łomu
+        ],
+        items: [
+            { name: "maska", x: 200, y: 520, color: "green", label: "Maska Gazowa" },
+            { name: "klucz_nastawny", x: 500, y: 520, color: "grey", label: "Klucz Nastawny" },
+            { name: "lampa", x: 600, y: 520, color: "yellow", label: "Lampa Węglowa" }
+        ]
+    },
+    "poddasze": {
+        name: "Niskie Poddasze",
+        bg: "#220",
+        lowCeiling: true, // Wymaga czołgania
+        hazard: "wata",   // Wata szklana
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "strych", x: 400, y: 550, w: 100, h: 20, targetX: 400, targetY: 50 }
+        ],
+        items: [
+            { name: "pakiet_wwi", x: 100, y: 520, color: "olive", label: "Pakiet WWI (Wymaga Skrzyni)" },
+            { name: "klucz_czesc_1", x: 700, y: 520, color: "silver", label: "Część Klucza 1" }
+        ]
+    },
+    "sklad": {
+        name: "Skład Węgla",
+        bg: "#111",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 10, y: 450, w: 20, h: 100, targetX: 250, targetY: 450 },
+            { to: "kotlownia", x: 770, y: 450, w: 20, h: 100, targetX: 50, targetY: 450 }
+        ],
+        items: [
+            { name: "lom", x: 200, y: 520, color: "red", label: "Łom" },
+            { name: "wegiel", x: 300, y: 520, color: "black", label: "Węgiel" },
+            { name: "rekawice", x: 400, y: 520, color: "orange", label: "Rękawice" },
+            { name: "bomba", x: 500, y: 520, color: "white", label: "Bomba Gaśnicza" }
+        ]
+    },
+    "kotlownia": {
+        name: "Kotłownia",
+        bg: "#200",
+        hazard: "czad",
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "sklad", x: 10, y: 450, w: 20, h: 100, targetX: 700, targetY: 450 },
+            { to: "bunkier", x: 400, y: 450, w: 50, h: 50, targetX: 50, targetY: 450, locked: true, keyId: "tunel" } // Zalany tunel
+        ],
+        items: [
+            { name: "skrzynia", x: 150, y: 520, color: "brown", label: "Skrzynia Narzędziowa" },
+            { name: "stol", x: 600, y: 500, w: 60, h: 50, color: "blue", label: "Stół Majsterkowicza", static: true },
+            { name: "piec", x: 300, y: 450, w: 80, h: 100, color: "darkred", label: "Piec (Gorący)", static: true }
+        ]
+    },
+    "bunkier": {
+        name: "Bunkier",
+        bg: "#000",
+        dark: true, // Ciemność
+        platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "kotlownia", x: 10, y: 450, w: 20, h: 100, targetX: 400, targetY: 450 }
+        ],
+        items: [
+            { name: "klucz_czesc_2", x: 700, y: 520, color: "silver", label: "Część Klucza 2" }
+        ]
+    }
+};
+
+/**
+ * OBSŁUGA WEJŚCIA (KLAWIATURA)
+ */
+const keys = { w:false, a:false, s:false, d:false, z:false, e:false, f:false, r:false, one:false, two:false, three:false };
+
+window.addEventListener('keydown', (e) => {
+    if(e.code === 'KeyW') keys.w = true;
+    if(e.code === 'KeyA') keys.a = true;
+    if(e.code === 'KeyS') keys.s = true;
+    if(e.code === 'KeyD') keys.d = true;
+    if(e.code === 'KeyZ') keys.z = true;
+    if(e.code === 'KeyE') actionEquip();
+    if(e.code === 'KeyF') actionUse();
+    if(e.code === 'KeyR') actionReload();
+    if(e.code === 'Digit1') equipWeapon(1);
+    if(e.code === 'Digit2') equipWeapon(2);
+    if(e.code === 'Digit3') equipWeapon(3);
+});
+
+window.addEventListener('keyup', (e) => {
+    if(e.code === 'KeyW') keys.w = false;
+    if(e.code === 'KeyA') keys.a = false;
+    if(e.code === 'KeyS') keys.s = false;
+    if(e.code === 'KeyD') keys.d = false;
+    if(e.code === 'KeyZ') keys.z = false;
+});
+
+/**
+ * LOGIKA GRY (FUNKCJE POMOCNICZE)
+ */
+
+function showMessage(msg) {
+    const box = document.getElementById('message-box');
+    box.innerText = msg;
+    box.style.display = 'block';
+    game.messageTimer = 180; // 3 sekundy (przy 60fps)
+}
+
+function updateHUD() {
+    // Serce
+    const heart = document.getElementById('heart-display');
+    const colorVal = Math.floor((player.hp / 100) * 255);
+    heart.style.color = `rgb(${colorVal}, 0, 0)`;
+    if(player.hp <= 0) heart.style.color = "black";
+
+    // Klucze
+    document.getElementById('key1').className = "key-slot" + (player.keysParts[0] ? " key-found" : "");
+    document.getElementById('key2').className = "key-slot" + (player.keysParts[1] ? " key-found" : "");
+    document.getElementById('key3').className = "key-slot" + (player.keysParts[2] ? " key-found" : "");
+
+    // Ekwipunek
+    document.getElementById('inv-list').innerText = player.inventory.length > 0 ? player.inventory.join(", ") : "Pusty";
+    document.getElementById('hand-item').innerText = player.activeItem ? player.activeItem : "Brak";
+}
+
+function hasItem(name) {
+    return player.inventory.includes(name);
+}
+
+function removeItem(name) {
+    const idx = player.inventory.indexOf(name);
+    if(idx > -1) player.inventory.splice(idx, 1);
+}
+
+// System resetu świata (Roguelike)
+function resetWorld() {
+    if(!game.flags.recorderData) {
+        alert("GAME OVER. Nie zostawiłeś wiadomości w dyktafonie. Prawdziwa śmierć.");
+        location.reload();
+    } else {
+        alert(`ODRODZENIE. Wiadomość znaleziona: "${game.flags.recorderData.msg}". Powodzenia, ${game.flags.recorderData.name}.`);
+        player.hp = 100;
+        player.x = 100;
+        player.y = 500;
+        player.inventory = [];
+        player.keysParts = [false, false, false];
+        game.currentRoom = "hol";
+        // Reset potworów
+        monsters.tarantula.active = true;
+        monsters.breather.room = "bunkier";
+        // Tutaj można dodać kod resetujący pozycje przedmiotów, jeśli je przesuwaliśmy
+    }
+}
+
+/**
+ * GŁÓWNA PĘTLA LOGICZNA
+ */
+function update() {
+    if(game.gameOver) return;
+    if(game.messageTimer > 0) {
+        game.messageTimer--;
+        if(game.messageTimer <= 0) document.getElementById('message-box').style.display = 'none';
+    }
+
+    // 1. STANY GRACZA
+    let currentSpeed = PLAYER_SPEED;
+    if(keys.z) {
+        player.state = "crawling";
+        player.height = 20;
+        currentSpeed = PLAYER_SPEED * 0.3; // 30% prędkości
+    } else if(keys.s) {
+        player.state = "crouching";
+        player.height = 30;
+    } else {
+        player.state = "standing";
+        player.height = 50;
+        // Sprawdzenie sufitu (Poddasze)
+        if(rooms[game.currentRoom].lowCeiling) {
+             // Wymuś czołganie lub blokuj ruch, jeśli próbuje wstać
+             player.state = "crawling"; 
+             player.height = 20;
+             currentSpeed = PLAYER_SPEED * 0.3;
+        }
+    }
+
+    // Skradanie w bunkrze (Wymuszone)
+    if(game.currentRoom === "bunkier") currentSpeed = Math.min(currentSpeed, PLAYER_SPEED * 0.5);
+
+    // 2. RUCH POZIOMY
+    player.vx = 0;
+    if(keys.a) player.vx = -currentSpeed;
+    if(keys.d) player.vx = currentSpeed;
+    
+    // Prosta kolizja z krawędziami ekranu
+    if(player.x + player.vx < 0) player.x = 0;
+    else if(player.x + player.width + player.vx > canvas.width) player.x = canvas.width - player.width;
+    else player.x += player.vx;
+
+    // 3. FIZYKA PIONOWA (Skok i Grawitacja)
+    player.vy += GRAVITY;
+    player.y += player.vy;
+
+    // Kolizja z podłogą
+    const room = rooms[game.currentRoom];
+    let onGround = false;
+    room.platforms.forEach(plat => {
+        if(player.x + player.width > plat[0] && player.x < plat[0] + plat[2] &&
+           player.y + player.height > plat[1] && player.y + player.height < plat[1] + 20) {
+               player.y = plat[1] - player.height;
+               player.vy = 0;
+               onGround = true;
+        }
+    });
+
+    if(onGround && keys.w && player.state === "standing") {
+        player.vy = JUMP_FORCE;
+    }
+
+    // 4. PRZEJŚCIA MIĘDZY POKOJAMI
+    room.doors.forEach(door => {
+        if(checkRectCollide(player.x, player.y, player.width, player.height, door.x, door.y, door.w, door.h)) {
+            // Sprawdzenie zamknięcia
+            if(door.locked) {
+                if(door.keyId === "klucz_piwnica" && hasItem("klucz_piwnica")) {
+                    showMessage("Otwierasz drzwi kluczem.");
+                } else if(door.keyId === "lom" && hasItem("lom")) {
+                    showMessage("Wyważasz wejście łomem.");
+                } else if(door.keyId === "tunel" && game.flags.bunkierOpen) {
+                    // Otwarte
+                } else {
+                    showMessage("Zamknięte.");
+                    // Odbij gracza
+                    player.x -= player.vx * 5;
+                    return;
+                }
+            }
+            
+            // Przejście
+            game.currentRoom = door.to;
+            player.x = door.targetX;
+            player.y = door.targetY;
+        }
+    });
+
+    // 5. ZAGROŻENIA ŚRODOWISKOWE
+    if(room.hazard === "czad" && !hasItem("maska")) {
+        player.hp -= 0.5; // Szybka śmierć
+        showMessage("CZAD! Potrzebujesz maski!");
+    }
+    if(room.hazard === "wata" && !hasItem("buty") && (Math.abs(player.vx) > 0)) {
+        player.hp -= 0.1;
+        showMessage("Ała! Wata szklana rani stopy!");
+    }
+
+    // 6. OBSŁUGA POTWORÓW
+    
+    // Tarantula (Tylko w składzie)
+    if(monsters.tarantula.active && game.currentRoom === "sklad") {
+        moveEnemyTowardsPlayer(monsters.tarantula, 2);
+        if(checkEnemyCollision(monsters.tarantula)) {
+            player.hp -= 1;
+        }
+    }
+
+    // Ten, który oddycha (Malachiasz)
+    if(monsters.breather.active && game.flags.stoveOff) { // Wybudza się później w logice
+        // Logika podążania za graczem (uproszczona)
+        if(monsters.breather.room === game.currentRoom) {
+            if(monsters.breather.stunnedTimer > 0) {
+                monsters.breather.stunnedTimer--;
+            } else {
+                moveEnemyTowardsPlayer(monsters.breather, monsters.breather.speed);
+                if(checkEnemyCollision(monsters.breather)) {
+                    player.hp -= 2; // Duże obrażenia
+                }
+            }
+        } else {
+            // Teleportacja potwora bliżej gracza (bardzo wolna)
+            if(Math.random() < 0.01) monsters.breather.room = game.currentRoom;
+        }
+    }
+
+    // Śmierć
+    if(player.hp <= 0) {
+        resetWorld();
+    }
+
+    updateHUD();
+}
+
+function checkRectCollide(x1, y1, w1, h1, x2, y2, w2, h2) {
+    return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
+function moveEnemyTowardsPlayer(enemy, speed) {
+    if(enemy.x < player.x) enemy.x += speed;
+    else enemy.x -= speed;
+}
+
+function checkEnemyCollision(enemy) {
+    return checkRectCollide(player.x, player.y, player.width, player.height, enemy.x, enemy.y, 40, 40);
+}
+
+/**
+ * INTERAKCJE (E, F, 1-3)
+ */
+
+function actionEquip() {
+    // Podnoszenie przedmiotów z ziemi
+    const room = rooms[game.currentRoom];
+    for(let i = 0; i < room.items.length; i++) {
+        let item = room.items[i];
+        if(item.static || item.hidden) continue;
+
+        if(checkRectCollide(player.x, player.y, player.width, player.height, item.x, item.y, 30, 30)) {
+            // Logika specjalna
+            if(item.name.includes("klucz_czesc")) {
+                let partId = parseInt(item.name.split("_")[2]) - 1;
+                player.keysParts[partId] = true;
+                showMessage("Znalazłeś część klucza!");
+            } else if(item.name === "dyktafon") {
+                 showMessage("DYKTAFON (F by użyć). Zostaw wiadomość dla potomnych.");
+                 return; // Dyktafon zostaje na ziemi
+            } else {
+                player.inventory.push(item.name);
+                showMessage("Podniosłeś: " + item.label);
+            }
+            room.items.splice(i, 1);
+            return;
+        }
+    }
+}
+
+function actionUse() {
+    // Używanie interaktywnych obiektów
+    const room = rooms[game.currentRoom];
+    
+    // Sprawdź Dyktafon (Sypialnia)
+    if(game.currentRoom === "sypialnia" && Math.abs(player.x - 400) < 50) {
+        const lore = "Nazywam się... [Lore Text]... nie zapalaj lampy w ciemności.";
+        alert(lore);
+        let name = prompt("Podaj swój pseudonim:");
+        let msg = prompt("Twoja wiadomość dla przyszłych ofiar:");
+        if(name && msg) {
+            game.flags.recorderData = { name: name, msg: msg };
+            showMessage("Wiadomość nagrana. Punkt przywracania aktywny.");
+        }
+        return;
+    }
+
+    // Sprawdź Regał (Salon)
+    if(game.currentRoom === "salon" && Math.abs(player.x - 400) < 50) {
+        if(hasItem("rekawice")) {
+            showMessage("Przesuwasz regał...");
+            room.items.find(i => i.name === "regal").x = 600; // Przesuń
+            room.items.find(i => i.name === "klucz_czesc_3").hidden = false; // Odsłoń klucz
+        } else {
+            showMessage("Za ciężki. Potrzebujesz rękawic.");
+        }
+    }
+
+    // Sprawdź Stół (Kotłownia lub Hol)
+    // (Uproszczona logika: Jeśli masz 3 części i klucz piwnica, stwórz klucz wyjściowy)
+    if((game.currentRoom === "kotlownia" || game.currentRoom === "hol") && hasItem("klucz_piwnica")) {
+        // Sprawdzamy czy stoimy przy stole
+        let table = room.items.find(i => i.name === "stol");
+        if(table && checkRectCollide(player.x, player.y, player.width, player.height, table.x, table.y, table.w, table.h)) {
+            if(player.keysParts[0] && player.keysParts[1] && player.keysParts[2]) {
+                showMessage("Tworzysz KLUCZ WYJŚCIOWY! Klucz piwniczny zniszczony.");
+                removeItem("klucz_piwnica");
+                game.flags.finalKeyForged = true;
+            } else {
+                showMessage("Brakuje części klucza.");
+            }
+        }
+    }
+}
+
+function equipWeapon(slot) {
+    if(!hasItem("skrzynia")) {
+        showMessage("Potrzebujesz skrzyni na narzędzia, by używać broni.");
+        return;
+    }
+    // Prosta symulacja: 1=Gaz, 2=Rewolwer, 3=Granat
+    if(slot === 1) player.activeItem = "gaz";
+    if(slot === 2) player.activeItem = "rewolwer";
+    if(slot === 3) player.activeItem = "granat";
+    showMessage("Wybrano: " + player.activeItem);
+}
+
+function actionReload() {
+    if(player.activeItem === "rewolwer") {
+        showMessage("Przeładowywanie... (3s)");
+        // Tu można dodać timeout blokujący strzelanie
+    }
+}
+
+/**
+ * RYSOWANIE (RENDER)
+ */
+function draw() {
+    // 1. Tło i Pokój
+    const room = rooms[game.currentRoom];
+    ctx.fillStyle = room.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Elementy pokoju (Drzwi, Platformy)
+    ctx.fillStyle = "#666"; // Podłoga
+    room.platforms.forEach(p => ctx.fillRect(p[0], p[1], p[2], p[3]));
+    
+    // Drzwi
+    room.doors.forEach(d => {
+        ctx.fillStyle = d.locked ? "red" : "lime";
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+    });
+
+    // 3. Przedmioty
+    room.items.forEach(item => {
+        if(item.hidden) return;
+        ctx.fillStyle = item.color;
+        let w = item.w || 20;
+        let h = item.h || 20;
+        ctx.fillRect(item.x, item.y, w, h);
+    });
+
+    // 4. Gracz
+    ctx.fillStyle = player.color;
+    ctx.fillRect(player.x, player.y, player.width, player.height);
+    // Latarka/Oczy
+    ctx.fillStyle = "white";
+    if(game.currentRoom !== "bunkier") ctx.fillRect(player.x + 10, player.y + 5, 5, 5);
+
+    // 5. Potwory
+    if(monsters.tarantula.active && game.currentRoom === monsters.tarantula.room) {
+        ctx.fillStyle = "purple"; // Tarantula
+        ctx.fillRect(monsters.tarantula.x, monsters.tarantula.y, 40, 20);
+    }
+    if(monsters.breather.active && game.currentRoom === monsters.breather.room) {
+        ctx.fillStyle = "darkgrey"; // Ten który oddycha
+        ctx.fillRect(monsters.breather.x, monsters.breather.y, 40, 80);
+    }
+
+    // 6. Ciemność (Bunkier)
+    if(room.dark) {
+        // Jeśli nie mamy lampy aktywnej (uproszczenie - zakładamy że jak masz lampę w eq to działa)
+        if(!hasItem("lampa")) {
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        } else {
+            // Efekt lampy (półmrok)
+            ctx.fillStyle = "rgba(0,0,0,0.8)";
+            ctx.fillRect(0,0, canvas.width, canvas.height);
+            // Wycięcie koła światła (zaawansowane canvas, tu uproszczone rysowanie)
+            ctx.clearRect(player.x - 100, player.y - 100, 230, 230);
+        }
+    }
+}
+
+/**
+ * URUCHOMIENIE GRY
+ */
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// Start
+showMessage("Witaj w Projekt Opiekun. Znajdź Dyktafon, by zapisać duszę.");
+gameLoop();
+
+</script>
+</body>
+</html>
