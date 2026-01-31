@@ -5,6 +5,7 @@ export const SPEED_MODIFIER = 0.6;
 export const GRAVITY = 0.5 * SPEED_MODIFIER;
 export const PLAYER_SPEED = 4 * SPEED_MODIFIER; 
 export const JUMP_FORCE = -9 * SPEED_MODIFIER;
+export const STUN_DURATION = 60 * 10; // 10 sekund (60 klatek na sekundę * 10)
 
 // Lista obrazków do załadowania
 export const IMAGE_LIST = [
