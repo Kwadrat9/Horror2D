@@ -31,6 +31,14 @@ export const player = {
 
 // Stan potworów
 export const monsters = {
-    tarantula: { active: true, room: "sklad", x: 400, y: 500, w: 60, h: 40, hp: 2 },
+    tarantula: { 
+        active: true, 
+        room: "sklad", 
+        x: 400, y: 510, w: 60, h: 40, 
+        hp: 2,
+        speed: 2,
+        direction: 1, // 1 to prawo, -1 to lewo
+        stunTimer: 0  // 0 oznacza, że jest aktywna
+    },
     breather: { active: true, room: "bunkier", x: 600, y: 460, w: 50, h: 90, hp: 100, speed: 2.0 * SPEED_MODIFIER }
 };
