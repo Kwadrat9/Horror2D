@@ -1,1 +1,63 @@
+/* Plik: style.css */
+body {
+    margin: 0;
+    background-color: #050505;
+    color: #ccc;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+}
 
+#gameContainer {
+    position: relative;
+    box-shadow: 0 0 30px #000;
+}
+
+canvas {
+    background-color: #111;
+    display: block;
+}
+
+/* UI */
+#ui-layer {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    pointer-events: none;
+    text-shadow: 1px 1px 2px black;
+}
+
+.heart { font-size: 30px; color: #e74c3c; }
+
+.keys-container { display: flex; gap: 5px; margin-top: 5px; }
+.key-slot { width: 25px; height: 25px; border: 2px solid #555; background: rgba(0,0,0,0.5); }
+.key-found { background: #bdc3c7; border-color: #c0392b; }
+
+#inventory-display {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    text-align: right;
+    font-size: 14px;
+    background: rgba(0,0,0,0.6);
+    padding: 10px;
+    border-radius: 5px;
+}
+
+#message-box {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 15px;
+    border: 1px solid #fff;
+    display: none;
+    text-align: center;
+    font-size: 18px;
+    max-width: 80%;
+}
