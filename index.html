@@ -589,23 +589,24 @@ function update() {
     }
 
     // 3. LOGIKA TARANTULI
-    if(game.currentRoom === 'sklad' && monsters.tarantula.active) {
-        let t = monsters.tarantula;
+if(game.currentRoom === 'sklad' && monsters.tarantula.active) {
+    let t = monsters.tarantula;
+    
+    if(t.stunned > 0) {
+        t.stunned--; // Odliczanie czasu ogłuszenia
+        t.vx = 0;    // Dodatkowo wymuszamy brak prędkości (opcjonalnie)
+    } else {
+        // Ruch odbywa się TYLKO gdy stunned wynosi 0
+        if(player.x > t.x + 10) t.x += ENEMY_SPEED;
+        else if(player.x < t.x - 10) t.x -= ENEMY_SPEED;
         
-        if(t.stunned > 0) {
-            t.stunned--;
-        } else {
-            // Ruch w stronę gracza
-            if(player.x > t.x + 10) t.x += ENEMY_SPEED;
-            else if(player.x < t.x - 10) t.x -= ENEMY_SPEED;
-            
-            // Atak
-            if(checkRectCollide(player.x, player.y, player.width, player.height, t.x, t.y, t.w, t.h)) {
-                player.hp -= 1; 
-                showMessage("Tarantula gryzie!", 60);
-            }
+        // Atak - też tylko gdy nie jest ogłuszona!
+        if(checkRectCollide(player.x, player.y, player.width, player.height, t.x, t.y, t.w, t.h)) {
+            player.hp -= 1; 
+            showMessage("Tarantula gryzie!", 60);
         }
     }
+}
 
     // Środowisko (Czad)
     if(room.hazard === "czad" && !player.clothing.includes("Maska Gazowa")) {
