@@ -2,28 +2,34 @@
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Projekt Opiekun - Naprawiona Fizyka</title>
+    <title>Projekt Opiekun - Pełna Wersja</title>
     <style>
         body { margin: 0; background: #050505; color: #ccc; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-        #gameContainer { position: relative; box-shadow: 0 0 30px #000; }
-        canvas { background: #111; display: block; border: 2px solid #333; }
+        #gameContainer { position: relative; box-shadow: 0 0 30px #000; border: 2px solid #333; }
+        canvas { background: #111; display: block; }
         #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; }
-        .heart { font-size: 24px; color: #e74c3c; font-weight: bold; }
-        #inventory-display { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #444; font-size: 13px; }
-        #message-box { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); background: black; color: white; padding: 10px; border: 1px solid white; display: none; z-index: 100; }
+        .heart { font-size: 24px; color: #e74c3c; font-weight: bold; text-shadow: 2px 2px black; }
+        #inventory-display { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #444; font-size: 13px; border-radius: 5px; }
+        #message-box { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); background: black; color: white; padding: 10px; border: 1px solid white; display: none; z-index: 100; text-align: center; }
+        .room-title { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); font-size: 20px; color: #777; }
     </style>
 </head>
 <body>
 
 <div id="gameContainer">
+    <div id="room-name" class="room-title">Hol</div>
     <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
     <div id="ui-layer">
         <div id="heart-display" class="heart">♥ HP: 100%</div>
     </div>
+
     <div id="inventory-display">
         <div style="color: yellow">RĘKA: <span id="hand-slot">Pusta</span></div>
         <div style="color: cyan">UBIÓR: <span id="clothing-slot">Brak</span></div>
+        <div id="key-parts" style="margin-top:5px; color: silver; font-size: 10px;">Części klucza: 0/3</div>
     </div>
+
     <div id="message-box"></div>
 </div>
 
@@ -31,72 +37,127 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// --- KONFIGURACJA ---
+// --- USTAWIENIA SILNIKA (40% WOLNIEJ) ---
 const SPEED_MOD = 0.6; 
 const GRAVITY = 0.5 * SPEED_MOD;
 const PLAYER_SPEED = 4 * SPEED_MOD;
 const JUMP_FORCE = -9 * SPEED_MOD;
 
-// --- GRAFIKI (System Fallback) ---
+// --- GRAFIKI ---
 const textures = {};
-const imgNames = ['player', 'tarantula', 'item_noz', 'item_zapalniczka', 'bg_hol', 'bg_sklad'];
+const imgNames = [
+    'player', 'tarantula', 'breather', 'door_tex',
+    'bg_hol', 'bg_salon', 'bg_kuchnia', 'bg_sypialnia', 'bg_korytarz', 'bg_strych', 'bg_poddasze', 'bg_sklad', 'bg_kotlownia', 'bg_bunkier',
+    'item_noz', 'item_zapalniczka', 'item_buty', 'item_dyktafon', 'item_maska', 'item_lom', 'item_klucz', 'item_part1', 'item_part2', 'item_part3'
+];
 imgNames.forEach(name => {
     const img = new Image();
-    img.src = `img/${name}.png`;
+    img.src = `img/${name}.png`; 
     textures[name] = img;
 });
 
-function drawSprite(name, x, y, w, h, color) {
+function drawSprite(name, x, y, w, h, fallbackColor) {
     const img = textures[name];
     if (img && img.complete && img.naturalWidth !== 0) {
         ctx.drawImage(img, x, y, w, h);
     } else {
-        ctx.fillStyle = color;
+        ctx.fillStyle = fallbackColor;
         ctx.fillRect(x, y, w, h);
     }
 }
 
-// --- OBIEKTY GRY ---
+// --- DANE GRY ---
 let game = {
     room: "hol",
     messageTimer: 0,
-    projectiles: []
+    projectiles: [],
+    keyPartsFound: 0
 };
 
 let player = {
-    x: 100, y: 400,
-    width: 30, height: 60,
-    vx: 0, vy: 0,
-    hp: 100,
-    facingRight: true,
-    handItem: null,
-    clothing: []
+    x: 100, y: 490, width: 30, height: 60,
+    vx: 0, vy: 0, hp: 100,
+    facingRight: true, handItem: null, clothing: []
 };
 
-let tarantula = {
-    active: true,
-    room: "sklad",
-    x: 600, y: 510, // Nieco wyżej, żeby nóż trafił
-    w: 60, h: 40,
-    stunned: 0,
-    speed: 1.5 * SPEED_MOD
-};
+let tarantula = { active: true, x: 600, y: 510, w: 60, h: 40, stunned: 0, speed: 1.5 * SPEED_MOD };
 
+// --- MAPA WSZYSTKICH POKOI ---
 const rooms = {
     "hol": {
-        bg: "bg_hol",
+        name: "Hol", bg: "bg_hol",
         platforms: [[0, 550, 800, 50]],
-        doors: [{ to: "sklad", x: 700, y: 450, w: 50, h: 100, tx: 100, ty: 450 }],
+        doors: [
+            { to: "salon", x: 20, y: 450, w: 40, h: 100, tx: 730, ty: 450 },
+            { to: "kuchnia", x: 740, y: 450, w: 40, h: 100, tx: 50, ty: 450 },
+            { to: "korytarz", x: 380, y: 450, w: 40, h: 100, tx: 380, ty: 450, label: "Schody" },
+            { to: "sklad", x: 200, y: 450, w: 40, h: 100, tx: 50, ty: 450, locked: true, keyName: "Klucz Piwniczny" }
+        ],
+        items: [{ id: "buty", name: "Buty", type: "clothing", x: 500, y: 520, color: "brown" }]
+    },
+    "salon": {
+        name: "Salon", bg: "bg_salon", platforms: [[0, 550, 800, 50]],
+        doors: [{ to: "hol", x: 740, y: 450, w: 40, h: 100, tx: 50, ty: 450 }],
         items: [
-            { id: "noz", name: "Nóż", x: 200, y: 520, color: "silver" },
-            { id: "zapalniczka", name: "Zapalniczka", x: 300, y: 520, color: "orange" }
+            { id: "klucz", name: "Klucz Piwniczny", type: "hand", x: 100, y: 520, color: "gold" },
+            { id: "regal", name: "Regał", type: "static", x: 400, y: 450, w: 60, h: 100, color: "sienna" }
         ]
     },
-    "sklad": {
-        bg: "bg_sklad",
-        platforms: [[0, 550, 800, 50]],
-        doors: [{ to: "hol", x: 50, y: 450, w: 50, h: 100, tx: 650, ty: 450 }],
+    "kuchnia": {
+        name: "Kuchnia", bg: "bg_kuchnia", platforms: [[0, 550, 800, 50]],
+        doors: [{ to: "hol", x: 20, y: 450, w: 40, h: 100, tx: 700, ty: 450 }],
+        items: [
+            { id: "noz", name: "Nóż", type: "hand", x: 300, y: 520, color: "silver" },
+            { id: "zapalniczka", name: "Zapalniczka", type: "hand", x: 400, y: 520, color: "orange" }
+        ]
+    },
+    "korytarz": {
+        name: "Korytarz", bg: "bg_korytarz", platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 380, y: 450, w: 40, h: 100, tx: 380, ty: 450, label: "Schody w dół" },
+            { to: "sypialnia", x: 20, y: 450, w: 40, h: 100, tx: 730, ty: 450 },
+            { to: "strych", x: 740, y: 450, w: 40, h: 100, tx: 50, ty: 450 }
+        ],
         items: []
+    },
+    "sypialnia": {
+        name: "Sypialnia", bg: "bg_sypialnia", platforms: [[0, 550, 800, 50]],
+        doors: [{ to: "korytarz", x: 740, y: 450, w: 40, h: 100, tx: 50, ty: 450 }],
+        items: [{ id: "dyktafon", name: "Dyktafon", type: "hand", x: 400, y: 520, color: "cyan" }]
+    },
+    "strych": {
+        name: "Strych", bg: "bg_strych", platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "korytarz", x: 20, y: 450, w: 40, h: 100, tx: 700, ty: 450 },
+            { to: "poddasze", x: 400, y: 450, w: 40, h: 100, tx: 400, ty: 500, locked: true, keyName: "Łom" }
+        ],
+        items: [{ id: "maska", name: "Maska Gazowa", type: "clothing", x: 600, y: 520, color: "green" }]
+    },
+    "poddasze": {
+        name: "Poddasze", bg: "bg_poddasze", platforms: [[0, 550, 800, 50]], lowCeiling: true,
+        doors: [{ to: "strych", x: 400, y: 500, w: 60, h: 50, tx: 400, ty: 450 }],
+        items: [{ id: "part1", name: "Część Klucza 1", type: "keypart", x: 700, y: 520, color: "white" }]
+    },
+    "sklad": {
+        name: "Skład", bg: "bg_sklad", platforms: [[0, 550, 800, 50]],
+        doors: [
+            { to: "hol", x: 20, y: 450, w: 40, h: 100, tx: 200, ty: 450 },
+            { to: "kotlownia", x: 740, y: 450, w: 40, h: 100, tx: 50, ty: 450 }
+        ],
+        items: [{ id: "lom", name: "Łom", type: "hand", x: 300, y: 520, color: "red" }]
+    },
+    "kotlownia": {
+        name: "Kotłownia", bg: "bg_kotlownia", platforms: [[0, 550, 800, 50]], hazard: "czad",
+        doors: [
+            { to: "sklad", x: 20, y: 450, w: 40, h: 100, tx: 700, ty: 450 },
+            { to: "bunkier", x: 400, y: 450, w: 40, h: 100, tx: 50, ty: 450, locked: true, keyName: "Klucz Wyjścia" }
+        ],
+        items: [{ id: "part2", name: "Część Klucza 2", type: "keypart", x: 600, y: 520, color: "white" }]
+    },
+    "bunkier": {
+        name: "Bunkier", bg: "bg_bunkier", platforms: [[0, 550, 800, 50]], dark: true,
+        doors: [{ to: "kotlownia", x: 20, y: 450, w: 40, h: 100, tx: 400, ty: 450 }],
+        items: [{ id: "part3", name: "Część Klucza 3", type: "keypart", x: 700, y: 520, color: "white" }]
     }
 };
 
@@ -106,75 +167,121 @@ window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
 window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
 
 window.addEventListener('keydown', (e) => {
-    if (e.key.toLowerCase() === 'e') interact();
-    if (e.key.toLowerCase() === 'g') throwKnife();
-    if (e.key.toLowerCase() === 'f') useLighter();
+    const k = e.key.toLowerCase();
+    if (k === 'e') actionInteract();
+    if (k === 'f') actionUse();
+    if (k === 'g') actionSpecial();
 });
 
 function showMessage(txt) {
     const b = document.getElementById('message-box');
     b.innerText = txt; b.style.display = 'block';
-    game.messageTimer = 120;
+    game.messageTimer = 150;
 }
 
-// --- LOGIKA ---
-function throwKnife() {
-    if (player.handItem && player.handItem.id === 'noz') {
-        game.projectiles.push({
-            x: player.x, y: player.y + 20,
-            vx: player.facingRight ? 10 : -10,
-            w: 15, h: 5
-        });
+// --- AKCJE ---
+function actionInteract() {
+    const r = rooms[game.room];
+    const foundIdx = r.items.findIndex(it => Math.abs(player.x - it.x) < 50);
+
+    if (foundIdx !== -1) {
+        let it = r.items[foundIdx];
+        if (it.type === "keypart") {
+            game.keyPartsFound++;
+            r.items.splice(foundIdx, 1);
+            showMessage(`Zdobyto część klucza! (${game.keyPartsFound}/3)`);
+        } else if (it.type === "clothing") {
+            player.clothing.push(it.name);
+            r.items.splice(foundIdx, 1);
+            showMessage("Założono: " + it.name);
+        } else if (it.type === "hand") {
+            if (player.handItem) {
+                let temp = player.handItem;
+                temp.x = player.x;
+                player.handItem = it;
+                r.items[foundIdx] = temp;
+                showMessage("Wymieniono przedmiot.");
+            } else {
+                player.handItem = it;
+                r.items.splice(foundIdx, 1);
+                showMessage("Podniesiono: " + it.name);
+            }
+        }
+    } else if (player.handItem) {
+        let it = player.handItem;
+        it.x = player.x;
+        r.items.push(it);
+        player.handItem = null;
+        showMessage("Wyrzucono przedmiot.");
+    }
+}
+
+function actionUse() {
+    const r = rooms[game.room];
+    
+    // Drzwi
+    r.doors.forEach(d => {
+        if (Math.abs(player.x - d.x) < 40) {
+            if (d.locked) {
+                if (player.handItem && player.handItem.name === d.keyName) {
+                    d.locked = false;
+                    showMessage("Otwarto drzwi!");
+                } else {
+                    showMessage("Wymaga: " + d.keyName);
+                    return;
+                }
+            }
+            game.room = d.to;
+            player.x = d.tx;
+            player.y = d.ty;
+            document.getElementById('room-name').innerText = rooms[game.room].name;
+        }
+    });
+
+    // Zapalniczka na tarantulę
+    if (player.handItem && player.handItem.id === "zapalniczka" && game.room === "sklad" && tarantula.active) {
+        if (Math.abs(player.x - tarantula.x) < 80) {
+            tarantula.active = false;
+            player.handItem = null;
+            showMessage("SPALONO TARANTULĘ!");
+        }
+    }
+}
+
+function actionSpecial() {
+    if (player.handItem && player.handItem.id === "noz") {
+        game.projectiles.push({ x: player.x, y: player.y + 20, vx: player.facingRight ? 10 : -10, w: 15, h: 5 });
         player.handItem = null;
         showMessage("Rzucono nożem!");
     }
-}
-
-function useLighter() {
-    if (player.handItem && player.handItem.id === 'zapalniczka' && game.room === "sklad" && tarantula.active) {
-        let dist = Math.abs(player.x - tarantula.x);
-        if (dist < 60) {
-            tarantula.active = false;
-            player.handItem = null;
-            showMessage("Tarantula spłonęła!");
-        }
+    if (player.handItem && player.handItem.id === "dyktafon") {
+        localStorage.setItem("opiekun_save", JSON.stringify({room: game.room, hp: player.hp}));
+        showMessage("ZAPISANO STAN GRY.");
     }
 }
 
-function interact() {
-    const r = rooms[game.room];
-    r.items.forEach((it, i) => {
-        if (Math.abs(player.x - it.x) < 40) {
-            if (player.handItem) r.items.push(player.handItem);
-            player.handItem = it;
-            r.items.splice(i, 1);
-            showMessage("Podniesiono: " + it.name);
-        }
-    });
-}
-
+// --- UPDATE ---
 function update() {
-    // Wysokość zależna od kucania (S)
-    let targetHeight = 60;
-    if (keys['s']) targetHeight = 35;
+    let r = rooms[game.room];
     
-    // NAPRAWA WPADANIA: Jeśli zmieniamy wysokość, korygujemy Y, by stopy były w tym samym miejscu
-    if (player.height !== targetHeight) {
-        player.y += (player.height - targetHeight);
-        player.height = targetHeight;
+    // Fizyka kucania
+    let targetH = (keys['s'] || r.lowCeiling) ? 35 : 60;
+    if (player.height !== targetH) {
+        player.y += (player.height - targetH);
+        player.height = targetH;
     }
 
-    // Ruch
+    // Poruszanie
     if (keys['a']) { player.vx = -PLAYER_SPEED; player.facingRight = false; }
     else if (keys['d']) { player.vx = PLAYER_SPEED; player.facingRight = true; }
-    else { player.vx = 0; }
+    else player.vx = 0;
 
     player.vy += GRAVITY;
     player.x += player.vx;
     player.y += player.vy;
 
-    // Kolizja z podłogą
-    rooms[game.room].platforms.forEach(p => {
+    // Kolizja z ziemią
+    r.platforms.forEach(p => {
         if (player.x + player.width > p[0] && player.x < p[0] + p[2] &&
             player.y + player.height > p[1] && player.y + player.height < p[1] + 15) {
             player.y = p[1] - player.height;
@@ -183,45 +290,33 @@ function update() {
         }
     });
 
-    // Drzwi
-    rooms[game.room].doors.forEach(d => {
-        if (keys['f'] && Math.abs(player.x - d.x) < 30) {
-            game.room = d.to;
-            player.x = d.tx;
-            player.y = d.ty;
-        }
-    });
-
-    // Projektyle i Tarantula
-    game.projectiles.forEach((p, pi) => {
-        p.x += p.vx;
-        if (game.room === "sklad" && tarantula.active) {
-            if (p.x < tarantula.x + tarantula.w && p.x + p.w > tarantula.x &&
-                p.y < tarantula.y + tarantula.h && p.y + p.h > tarantula.y) {
-                tarantula.stunned = 180;
-                game.projectiles.splice(pi, 1);
-                showMessage("Tarantula ogłuszona!");
-            }
-        }
-    });
-
+    // Tarantula
     if (game.room === "sklad" && tarantula.active) {
-        if (tarantula.stunned > 0) {
-            tarantula.stunned--;
-        } else {
+        if (tarantula.stunned > 0) tarantula.stunned--;
+        else {
             if (player.x > tarantula.x) tarantula.x += tarantula.speed;
             else tarantula.x -= tarantula.speed;
-            
-            if (Math.abs(player.x - tarantula.x) < 30 && Math.abs(player.y - tarantula.y) < 40) {
-                player.hp -= 0.5;
-            }
+            if (Math.abs(player.x - tarantula.x) < 30) player.hp -= 0.5;
         }
     }
 
-    if (game.messageTimer > 0) {
-        game.messageTimer--;
-        if (game.messageTimer === 0) document.getElementById('message-box').style.display = 'none';
-    }
+    // Noże
+    game.projectiles.forEach((p, i) => {
+        p.x += p.vx;
+        if (game.room === "sklad" && tarantula.active) {
+            if (p.x > tarantula.x && p.x < tarantula.x + tarantula.w && p.y > tarantula.y && p.y < tarantula.y + tarantula.h) {
+                tarantula.stunned = 180;
+                game.projectiles.splice(i, 1);
+            }
+        }
+    });
+
+    // Hazard (Czad)
+    if (r.hazard === "czad" && !player.clothing.includes("Maska Gazowa")) player.hp -= 0.2;
+
+    if (player.hp <= 0) { alert("Zginąłeś!"); location.reload(); }
+    if (game.messageTimer > 0) game.messageTimer--;
+    else document.getElementById('message-box').style.display = 'none';
 
     updateUI();
 }
@@ -229,25 +324,32 @@ function update() {
 function updateUI() {
     document.getElementById('heart-display').innerText = `♥ HP: ${Math.ceil(player.hp)}%`;
     document.getElementById('hand-slot').innerText = player.handItem ? player.handItem.name : "Pusta";
+    document.getElementById('clothing-slot').innerText = player.clothing.length ? player.clothing.join(", ") : "Brak";
+    document.getElementById('key-parts').innerText = `Części klucza: ${game.keyPartsFound}/3`;
 }
 
+// --- RENDERING ---
 function draw() {
-    ctx.clearRect(0, 0, 800, 600);
-    const r = rooms[game.room];
+    let r = rooms[game.room];
+    ctx.clearRect(0,0,800,600);
     
-    // Tło
     drawSprite(r.bg, 0, 0, 800, 600, "#222");
-
-    // Platformy
-    ctx.fillStyle = "#333";
-    r.platforms.forEach(p => ctx.fillRect(p[0], p[1], p[2], p[3]));
-
+    
     // Drzwi
-    ctx.fillStyle = "brown";
-    r.doors.forEach(d => ctx.fillRect(d.x, d.y, d.w, d.h));
+    r.doors.forEach(d => {
+        drawSprite('door_tex', d.x, d.y, d.w, d.h, d.locked ? "red" : "brown");
+        if (Math.abs(player.x - d.x) < 40) {
+            ctx.fillStyle = "white"; ctx.fillText("[F] Wejdź", d.x - 10, d.y - 10);
+        }
+    });
 
     // Przedmioty
-    r.items.forEach(it => drawSprite(`item_${it.id}`, it.x, it.y, 30, 30, it.color));
+    r.items.forEach(it => {
+        drawSprite(`item_${it.id}`, it.x, it.y, 30, 30, it.color);
+        if (Math.abs(player.x - it.x) < 50) {
+            ctx.fillStyle = "lime"; ctx.fillText(`[E] ${it.name}`, it.x - 10, it.y - 10);
+        }
+    });
 
     // Tarantula
     if (game.room === "sklad" && tarantula.active) {
@@ -256,19 +358,21 @@ function draw() {
         ctx.globalAlpha = 1.0;
     }
 
-    // Nóż w locie
+    // Gracz
+    drawSprite('player', player.x, player.y, player.width, player.height, "blue");
+    
+    // Noże
     ctx.fillStyle = "white";
     game.projectiles.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
 
-    // Gracz
-    drawSprite('player', player.x, player.y, player.width, player.height, "blue");
+    // Ciemność
+    if (r.dark) {
+        ctx.fillStyle = "rgba(0,0,0,0.95)";
+        ctx.fillRect(0,0,800,600);
+    }
 }
 
-function loop() {
-    update();
-    draw();
-    requestAnimationFrame(loop);
-}
+function loop() { update(); draw(); requestAnimationFrame(loop); }
 loop();
 </script>
 </body>
