@@ -8,7 +8,7 @@ export const JUMP_FORCE = -9 * SPEED_MODIFIER;
 
 // Lista obrazków do załadowania
 export const IMAGE_LIST = [
-    'player', 'tarantula', 'breather',
+    'player', 'tarantula', 'breather', 'door',
     'bg_hol', 'bg_salon', 'bg_kuchnia', 'bg_sypialnia', 'bg_korytarz', 
     'bg_strych', 'bg_poddasze', 'bg_sklad', 'bg_kotlownia', 'bg_bunkier',
     'item_buty', 'item_klucz', 'item_noz', 'item_zapalniczka', 'item_dyktafon',
