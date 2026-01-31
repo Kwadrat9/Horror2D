@@ -28,6 +28,28 @@ export function updatePhysics() {
     if (gameState.messageTimer > 0) {
         gameState.messageTimer--;
         if (gameState.messageTimer <= 0) document.getElementById('message-box').style.display = 'none';
+
+    // --- LOGIKA POTWORÓW (Tarantula) ---
+    const t = monsters.tarantula;
+    if (t.active && gameState.currentRoom === t.room) {
+        
+        if (t.stunTimer > 0) {
+            // Tarantula jest ogłuszona
+            t.stunTimer--;
+        } else {
+            // 1. RUCH PATROLOWY
+            t.x += t.speed * t.direction;
+
+            // Zawracanie przy ścianach pokoju (0 - 800)
+            if (t.x <= 50 || t.x + t.w >= 750) {
+                t.direction *= -1;
+            }
+
+            // 2. ATAK NA GRACZA (Obrażenia)
+            if (checkOverlap(player, {x: t.x, y: t.y, width: t.w, height: t.h})) {
+                player.hp -= 0.5; // Zabiera HP co klatkę przy dotyku
+            }
+        }
     }
 
     // 1. Ustalanie stanu gracza (stanie, kucanie, czołganie)
@@ -147,6 +169,24 @@ export function handleItemInteraction() {
         }
     }
 
+
+    const t = monsters.tarantula;
+    
+    // ATACK NOŻEM (Jeśli mamy nóż w ręku i tarantula jest blisko)
+    if (player.handItem?.id === "noz" && 
+        gameState.currentRoom === t.room && 
+        checkOverlap(player, {x: t.x - 20, y: t.y - 20, width: t.w + 40, height: t.h + 40})) {
+        
+        import('./config.js').then(cfg => {
+            t.stunTimer = cfg.STUN_DURATION;
+        });
+        
+        showMessage("TRAFIONA! Tarantula ogłuszona na 10s!");
+        return; // Kończymy funkcję, żeby nie wyrzucić noża na ziemię
+    }
+
+
+    
     // A. Stoimy na przedmiocie -> Podnosimy/Używamy
     if(foundItemIndex !== -1) {
         let newItem = room.items[foundItemIndex];
@@ -235,6 +275,21 @@ export function drawGame() {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     room.platforms.forEach(p => ctx.fillRect(p[0], p[1], p[2], p[3]));
 
+    if(monsters.tarantula.active && gameState.currentRoom === "sklad") {
+    let t = monsters.tarantula;
+    let ctx = getCtx();
+    
+    if (t.stunTimer > 0) {
+        ctx.globalAlpha = 0.5; // Półprzezroczystość podczas ogłuszenia
+        drawSprite("tarantula", t.x, t.y, t.w, t.h, "grey");
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = "white";
+        ctx.fillText("OGŁUSZONA", t.x, t.y - 5);
+    } else {
+        drawSprite("tarantula", t.x, t.y, t.w, t.h, "purple");
+    }
+    }
+    
     // --- DRZWI (Zawsze widoczne z detalami) ---
     room.doors.forEach(d => {
         // 1. Rysowanie głównej tekstury drzwi
