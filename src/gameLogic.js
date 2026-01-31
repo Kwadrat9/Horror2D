@@ -235,18 +235,44 @@ export function drawGame() {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     room.platforms.forEach(p => ctx.fillRect(p[0], p[1], p[2], p[3]));
 
-    // Drzwi
+    // --- DRZWI (Zawsze widoczne z detalami) ---
     room.doors.forEach(d => {
-        if(checkOverlap(player, {x:d.x, y:d.y, width:d.w, height:d.h})) {
-            ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+        // 1. Rysowanie głównej tekstury drzwi
+        drawSprite('door', d.x, d.y, d.w, d.h, '#5d4037');
+
+        // 2. Rysowanie framugi (obramowania)
+        ctx.strokeStyle = "#3e2723"; // Bardzo ciemny brąz
+        ctx.lineWidth = 4;
+        ctx.strokeRect(d.x, d.y, d.w, d.h);
+
+        // 3. Rysowanie klamki (małe złote kółko)
+        ctx.fillStyle = "#f1c40f"; // Złoty kolor
+        ctx.beginPath();
+        // Umieszcza klamkę po prawej stronie (80% szerokości) w połowie wysokości
+        ctx.arc(d.x + d.w * 0.8, d.y + d.h * 0.5, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke(); // Dodaje obwódkę klamki
+
+        // 4. Logika podpowiedzi (tylko gdy gracz stoi przy drzwiach)
+        if(checkOverlap(player, {x: d.x, y: d.y, width: d.w, height: d.h})) {
+            // Lekkie rozświetlenie drzwi, gdy gracz przy nich stoi
+            ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
             ctx.fillRect(d.x, d.y, d.w, d.h);
+
             ctx.fillStyle = "white";
-            ctx.font = "14px monospace";
-            ctx.fillText("[F] Wejdź", player.x - 10, player.y - 10);
+            ctx.font = "bold 14px Courier New";
+            ctx.textAlign = "center";
+            
+            // Napis nad drzwiami
+            ctx.fillText("[F] OTWÓRZ", d.x + d.w / 2, d.y - 10);
+            
             if(d.locked) {
-                ctx.fillStyle = "red";
-                ctx.fillText("(Zamknięte)", player.x - 10, player.y - 25);
+                ctx.fillStyle = "#ff4d4d";
+                ctx.fillText("ZAMKNIĘTE", d.x + d.w / 2, d.y - 25);
             }
+            
+            // Resetujemy wyrównanie tekstu, żeby nie popsuć innych napisów
+            ctx.textAlign = "left";
         }
     });
 
