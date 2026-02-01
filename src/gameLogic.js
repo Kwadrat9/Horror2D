@@ -29,29 +29,6 @@ export function updatePhysics() {
         gameState.messageTimer--;
         if (gameState.messageTimer <= 0) document.getElementById('message-box').style.display = 'none';
 
-    // --- LOGIKA POTWORÓW (Tarantula) ---
-    const t = monsters.tarantula;
-    if (t.active && gameState.currentRoom === t.room) {
-        
-        if (t.stunTimer > 0) {
-            // Tarantula jest ogłuszona
-            t.stunTimer--;
-        } else {
-            // 1. RUCH PATROLOWY
-            t.x += t.speed * t.direction;
-
-            // Zawracanie przy ścianach pokoju (0 - 800)
-            if (t.x <= 50 || t.x + t.w >= 750) {
-                t.direction *= -1;
-            }
-
-            // 2. ATAK NA GRACZA (Obrażenia)
-            if (checkOverlap(player, {x: t.x, y: t.y, width: t.w, height: t.h})) {
-                player.hp -= 0.5; // Zabiera HP co klatkę przy dotyku
-            }
-        }
-    }
-
     // 1. Ustalanie stanu gracza (stanie, kucanie, czołganie)
     let currentSpeed = PLAYER_SPEED;
     let room = rooms[gameState.currentRoom];
@@ -115,9 +92,33 @@ export function updatePhysics() {
         gameState.gameOver = true;
     }
 
+    // --- LOGIKA POTWORÓW (Tarantula) ---
+    const t = monsters.tarantula;
+    if (t.active && gameState.currentRoom === t.room) {
+        
+        if (t.stunTimer > 0) {
+            // Tarantula jest ogłuszona
+            t.stunTimer--;
+        } else {
+            // 1. RUCH PATROLOWY
+            t.x += t.speed * t.direction;
+
+            // Zawracanie przy ścianach pokoju (0 - 800)
+            if (t.x <= 50 || t.x + t.w >= 750) {
+                t.direction *= -1;
+            }
+
+            // 2. ATAK NA GRACZA (Obrażenia)
+            if (checkOverlap(player, {x: t.x, y: t.y, width: t.w, height: t.h})) {
+                player.hp -= 0.5; // Zabiera HP co klatkę przy dotyku
+            }
+        }
+    }    
     updateUI();
 }
 
+
+    
 // --- INTERAKCJE (E i F) ---
 
 // Wywoływane przez input.js (klawisz F)
